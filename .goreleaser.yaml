@@ -45,7 +45,7 @@ brews:
     repository:
       owner: ArunNKutty
       name: homebrew-tap
-    folder: Formula
+    directory: Formula
     install: |
       bin.install "skt"
     test: |
