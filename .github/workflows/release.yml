@@ -31,3 +31,10 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} 
+
+brews:
+  - name: skt
+    homepage: "https://github.com/saltandpepperstudios/saaskitcli"
+    repository:
+      owner: ArunNKutty
+      name: homebrew-tap 
