@@ -43,8 +43,9 @@ brews:
     homepage: "https://github.com/saltandpepperstudios/saaskitcli"
     description: "SaaSKit CLI tool for various helpful commands"
     repository:
-      owner: ArunNKutty
+      owner: saltandpepperstudios
       name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     directory: Formula
     install: |
       bin.install "skt"
