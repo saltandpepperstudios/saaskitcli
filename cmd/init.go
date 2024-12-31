@@ -2,7 +2,10 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"time"
@@ -11,6 +14,54 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/oauth2"
 )
+
+// LicenseResponse represents the response from the license validation API
+type LicenseResponse []struct {
+	Key string `json:"key"`
+	// Add other fields if needed
+}
+
+// ValidateKey checks if the license key is valid by calling the SheetDB API
+func ValidateKey(key string) (bool, error) {
+	// Create the API URL with the key
+	apiURL := fmt.Sprintf("https://sheetdb.io/api/v1/ju2p5lmgeed0j/search?key=%s", key)
+
+	// Create a new request
+	req, err := http.NewRequest("GET", apiURL, nil)
+	if err != nil {
+		return false, fmt.Errorf("error creating request: %v", err)
+	}
+
+	// Add authorization header
+	req.Header.Add("Authorization", "Bearer 7nn8qwhuvlmr4t34xhc16jla3g73xzsz3p463k37")
+
+	// Make the request
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return false, fmt.Errorf("error making request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// Read the response body
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return false, fmt.Errorf("error reading response: %v", err)
+	}
+
+	// Parse the response
+	var licenseResp LicenseResponse
+	if err := json.Unmarshal(body, &licenseResp); err != nil {
+		return false, fmt.Errorf("error parsing response: %v", err)
+	}
+
+	// Check if the response is empty
+	if len(licenseResp) == 0 {
+		return false, fmt.Errorf("invalid license key. Please contact support@saasstarter.live")
+	}
+
+	return true, nil
+}
 
 var InitCmd = &cobra.Command{
 	Use:   "init",
@@ -34,13 +85,19 @@ var InitCmd = &cobra.Command{
 
 		// Verify license key
 		fmt.Println("🔑 Verifying license key...")
-		// TODO: Implement actual license verification
-		isValid := true // Placeholder for license validation
+		isValid, err := ValidateKey(key)
+		if err != nil {
+			fmt.Printf("❌ License validation failed: %v\n", err)
+			return
+		}
 
 		if !isValid {
 			fmt.Println("❌ Invalid license key")
+			fmt.Println("Please contact support@saasstarter.live to obtain a valid license key")
 			return
 		}
+
+		fmt.Println("✅ License key verified successfully!")
 
 		// Create project directory in current working directory
 		projectDir := fmt.Sprintf("%s/saasstarter-%s", path, name)
@@ -66,11 +123,18 @@ var InitCmd = &cobra.Command{
 		// Define repository details
 		owner := "saltandpepperstudios"
 		repo := "saas.service"
+		frontendRepo := "starterkit.client"
 
-		// Fork the repository
+		// Fork the backend repository
 		forkedRepo, err := forkRepo(ctx, client, owner, repo, org)
 		if err != nil {
-			fmt.Printf("🎉 Successfully initiated fork!: %v\n", "Thank you for using saaskit!")
+			fmt.Printf("🎉 Successfully initiated fork for Backend!: %v\n", "Thank you for using GO BACKEND for SaaS Starter Kit!")
+		}
+
+		// Fork the frontend repository
+		_, err = forkRepo(ctx, client, owner, frontendRepo, org)
+		if err != nil {
+			fmt.Printf("🎉 Successfully initiated fork for Frontend!: %v\n", "Thank you for using GO FRONTEND for SaaS Starter Kit!")
 		}
 
 		// Wait for fork to be ready
@@ -81,7 +145,7 @@ var InitCmd = &cobra.Command{
 
 		fmt.Println("🔄 Waiting for fork to be ready...")
 		fmt.Println("🔄 Forked Owner: ", forkedOwner)
-		forkURL, err := waitForFork(ctx, client, forkedOwner, repo)
+		forkURL, frontendForkURL, err := waitForFork(ctx, client, forkedOwner, repo, frontendRepo)
 		if err != nil {
 			fmt.Printf("❌ Error waiting for fork: %v\n", err)
 			return
@@ -92,13 +156,23 @@ var InitCmd = &cobra.Command{
 		// Clone the repository
 		fmt.Printf("📥 Cloning repository to %s...\n", projectDir)
 
-		gitCmd := exec.Command("git", "clone", forkURL+".git", projectDir)
-		// Capture output
+		// Clone backend repository
+		backendDir := projectDir + "/backend"
+		gitCmd := exec.Command("git", "clone", forkURL+".git", backendDir)
 		gitCmd.Stdout = os.Stdout
 		gitCmd.Stderr = os.Stderr
-
 		if err := gitCmd.Run(); err != nil {
-			fmt.Printf("❌ Failed to clone repository: %v\n", err)
+			fmt.Printf("❌ Failed to clone backend repository: %v\n", err)
+			return
+		}
+
+		// Clone frontend repository
+		frontendDir := projectDir + "/frontend"
+		frontendGitCmd := exec.Command("git", "clone", frontendForkURL+".git", frontendDir)
+		frontendGitCmd.Stdout = os.Stdout
+		frontendGitCmd.Stderr = os.Stderr
+		if err := frontendGitCmd.Run(); err != nil {
+			fmt.Printf("❌ Failed to clone frontend repository: %v\n", err)
 			return
 		}
 
@@ -146,15 +220,16 @@ func forkRepo(ctx context.Context, client *github.Client, owner, repo, organizat
 	return forkedRepo, nil
 }
 
-func waitForFork(ctx context.Context, client *github.Client, owner, repo string) (string, error) {
+func waitForFork(ctx context.Context, client *github.Client, owner, repo, frontendRepo string) (string, string, error) {
 	for i := 0; i < 3; i++ { // Retry up to 3 times
-		fork, _, err := client.Repositories.Get(ctx, owner, repo)
+		fork, _, _ := client.Repositories.Get(ctx, owner, repo)
+		frontendFork, _, err := client.Repositories.Get(ctx, owner, frontendRepo)
 		if err == nil {
 			fmt.Printf("Fork completed! Fork URL: %s\n", fork.GetHTMLURL())
-			return fork.GetHTMLURL(), nil
+			return fork.GetHTMLURL(), frontendFork.GetHTMLURL(), nil
 		}
 		fmt.Println("Fork not ready yet, retrying in 30 seconds...")
 		time.Sleep(10 * time.Second)
 	}
-	return "", fmt.Errorf("fork not completed after retries")
+	return "", "", fmt.Errorf("fork not completed after retries")
 }
